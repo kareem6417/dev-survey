@@ -1,7 +1,7 @@
 <?php
 // config.php
 $host = 'mandiricoal.co.id';
-$db   = 'survey_it';
+$db   = 'dev-survey';
 $user = 'admin';
 $pass = 'Jam10pagi';
 
