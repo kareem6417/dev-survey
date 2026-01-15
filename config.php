@@ -3,7 +3,7 @@
 $host = 'localhost';
 $db   = 'dev-survey_it';
 $user = 'admin-dev';
-$pass = 'Jam10pagi';
+$pass = 'Jam10pagi#';
 
 try {
     $pdo = new PDO("mysql:host=$host;dbname=$db", $user, $pass);
