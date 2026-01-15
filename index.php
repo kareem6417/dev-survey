@@ -377,61 +377,97 @@ $companies = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 }
             },
 
-            async searchNik() {
-                if (!this.nikInput) return;
+            async checkNik() {
+                if (this.nikInput.length < 3) {
+                    this.triggerAlert('error', 'NIK Pendek', 'Masukkan NIK minimal 3 digit.');
+                    return;
+                }
+
                 this.isLoading = true;
-                this.errorMessage = '';
+                this.errorMessage = "";
 
                 try {
-                    const res = await fetch(`handler.php?action=search_nik&nik=${this.nikInput}`);
-                    const json = await res.json();
-                    
-                    if (json.status === 'success') {
-                        const d = json.data;
-                        
-                        // VALIDASI CROSS-CHECK COMPANY
-                        let userComp = this.selectedCompanyName.toLowerCase().replace(/pt\.?\s*/g, '').trim();
-                        let apiComp = (d.company_name || '').toLowerCase().replace(/pt\.?\s*/g, '').trim();
-                        const isMatch = apiComp.includes(userComp) || userComp.includes(apiComp);
+                    const response = await fetch(`https://survey.mandiricoal.co.id/api/check-nik?nik=${this.nikInput}`);
+                    const data = await response.json();
 
-                        if (!isMatch) {
-                            this.triggerAlert(
-                                'error', 
-                                'Data Tidak Sesuai', 
-                                `NIK ${this.nikInput} terdaftar di "${d.company_name}", sedangkan Anda memilih "${this.selectedCompanyName}". Mohon periksa kembali pilihan Anda.`
-                            );
-                            
-                            this.isLoading = false;
-                            this.nikInput = ''; 
-                            return; 
-                        }
+                    if (data.status === 'success') {
+                        // 1. Data Ditemukan (Entah Lengkap atau Tidak)
+                        // Kita masukkan dulu data yang ada ke formData
+                        const emp = data.data;
 
                         this.formData = {
                             nik: this.nikInput,
-                            name: d.name,
-                            email: d.email,
-                            division: d.division
+                            name: emp.employee_name || '', // Jika kosong, set string kosong
+                            email: emp.email || '',
+                            division: emp.division || '',
+                            department: emp.department || '',
+                            position: emp.position || ''
                         };
-                        this.apiDobCheck = d.dob_check;
                         
-                        if (this.apiDobCheck) {
+                        // Simpan data pembanding untuk verifikasi DOB nanti
+                        this.apiDobCheck = emp.date_of_birth || ''; 
+                        this.apiCompanyCode = emp.company_code || '';
+
+                        // Cek kelengkapan data kunci
+                        // (Kita anggap lengkap jika DOB, Company, Divisi, dll ada)
+                        const isDataComplete = emp.company_code && emp.division && emp.department && emp.position && emp.date_of_birth;
+
+                        if (isDataComplete) {
+                            // KASUS A: Data Sempurna -> Mode AUTO
+                            this.mode = 'auto';
+
+                            // Auto-select perusahaan berdasarkan kode
+                            let foundCompany = this.companies.find(c => c.code === emp.company_code);
+                            if (foundCompany) {
+                                this.selectedCompanyId = foundCompany.id;
+                            }
+
+                            // Lanjut ke verifikasi Tanggal Lahir (Step 3)
                             this.step = 3; 
+                            
                         } else {
+                            // KASUS B: Data Ada tapi Tidak Lengkap -> Mode MANUAL
+                            this.mode = 'manual';
+                            
+                            // Beri tahu user
                             this.triggerAlert(
                                 'warning', 
                                 'Data Belum Lengkap', 
-                                'Data keamanan karyawan ini belum lengkap di sistem SAP. Silakan lanjutkan pengisian data secara manual.'
+                                'Data Anda ditemukan namun belum lengkap. Silakan lengkapi kolom yang kosong.'
                             );
-                            
-                            this.mode = 'manual';
-                            this.formData.nik = this.nikInput; 
+
+                            // Langsung ke Form Pengisian (Step 4), lewati verifikasi DOB karena mungkin DOB-nya kosong
                             this.step = 4;
                         }
+
                     } else {
-                        this.triggerAlert('error', 'Tidak Ditemukan', 'NIK yang Anda masukkan tidak terdaftar dalam database kami.');
+                        // KASUS C: Data Tidak Ditemukan Sama Sekali -> Mode MANUAL Full
+                        this.mode = 'manual';
+                        
+                        // Kosongkan form kecuali NIK
+                        this.formData = {
+                            nik: this.nikInput,
+                            name: '',
+                            email: '',
+                            division: '',
+                            department: '',
+                            position: ''
+                        };
+                        this.selectedCompanyId = '';
+
+                        this.triggerAlert(
+                            'info', 
+                            'Data Tidak Ditemukan', 
+                            'NIK tidak ditemukan di database. Silakan isi data diri Anda secara manual.'
+                        );
+
+                        // Langsung ke Form Pengisian (Step 4)
+                        this.step = 4;
                     }
+
                 } catch (e) {
-                    this.errorMessage = "Gagal koneksi server.";
+                    console.error(e);
+                    this.triggerAlert('error', 'Gagal Koneksi', 'Terjadi kesalahan saat menghubungi server.');
                 } finally {
                     this.isLoading = false;
                 }
