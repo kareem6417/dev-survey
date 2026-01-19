@@ -67,8 +67,19 @@ foreach ($companies as $comp) {
 }
 
 // C. Data Jawaban
-$questions = $pdo->query("SELECT * FROM questions ORDER BY id ASC")->fetchAll(PDO::FETCH_ASSOC);
+$sqlQ = "SELECT * FROM questions";
+$paramsQ = [];
 
+if ($currentFilter !== 'ALL') {
+    $sqlQ .= " WHERE company_id = ?";
+    $paramsQ[] = $currentFilter;
+}
+
+$sqlQ .= " ORDER BY id ASC";
+
+$stmtQ = $pdo->prepare($sqlQ);
+$stmtQ->execute($paramsQ);
+$questions = $stmtQ->fetchAll(PDO::FETCH_ASSOC);
 function getAnswerStats($pdo, $question_id, $filterCompanyId) {
     $sql = "SELECT a.answer_value, COUNT(*) as count 
             FROM answers a 
