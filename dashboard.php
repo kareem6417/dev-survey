@@ -220,8 +220,11 @@ function getAnswerStats($pdo, $question_id, $filterCompanyId) {
             ?>
             <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-100 hover:shadow-md transition-shadow">
                 <div class="mb-4 h-16 overflow-hidden">
-                    <h4 class="text-sm font-semibold text-slate-700 line-clamp-2" title="<?= htmlspecialchars($q['question_text']) ?>">
-                        <?= htmlspecialchars($q['question_text']) ?>
+                    <?php 
+                        $cleanQuestion = strip_tags($q['question_text']); 
+                    ?>
+                    <h4 class="text-sm font-semibold text-slate-700 line-clamp-2" title="<?= htmlspecialchars($cleanQuestion) ?>">
+                        <?= htmlspecialchars($cleanQuestion) ?>
                     </h4>
                     <span class="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 mt-1 inline-block uppercase font-bold tracking-wider">
                         <?= $type ?>
