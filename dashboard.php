@@ -1,10 +1,12 @@
 <?php
+
+if (!isset($_SESSION['is_admin_logged_in']) || $_SESSION['is_admin_logged_in'] !== true) {
+    header("Location: login.php");
+    exit();
+}
+
 require 'config.php';
 
-// --- 1. LOGIKA AUTH SEDERHANA (Opsional: Ganti dengan login sistem Anda) ---
-// if (!isset($_SESSION['admin_logged_in'])) { header('Location: login.php'); exit; }
-
-// --- 2. AMBIL DATA RINGKASAN ---
 // Total Responden
 $stmt = $pdo->query("SELECT COUNT(*) FROM respondents");
 $totalRespondents = $stmt->fetchColumn();
