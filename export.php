@@ -2,68 +2,77 @@
 session_start();
 require 'config.php';
 
-// 1. CEK KEAMANAN (Login Check)
+// 1. CEK KEAMANAN
 if (!isset($_SESSION['is_admin_logged_in']) || $_SESSION['is_admin_logged_in'] !== true) {
     die("Akses Ditolak. Harap login terlebih dahulu.");
 }
 
-// 2. CEK HAK AKSES & FILTER
-$adminScope = $_SESSION['admin_scope'] ?? 0;   // Hak Akses (ALL atau ID PT)
-$filterInput = $_GET['filter_company'] ?? 'ALL'; // Input dari URL
+// 2. TENTUKAN FILTER (HAK AKSES)
+$adminScope = $_SESSION['admin_scope'] ?? 0;
+$filterInput = $_GET['filter_company'] ?? 'ALL';
 
-// Logika Validasi Filter
 $finalFilter = 'ALL';
-
 if ($adminScope === 'ALL') {
-    // Jika Super Admin, ikuti input dari URL (Dropdown)
     $finalFilter = $filterInput;
 } else {
-    // Jika Admin PT, PAKSA filter sesuai ID perusahaannya (Supaya tidak bisa intip PT lain)
     $finalFilter = $adminScope;
 }
 
-// 3. SIAPKAN HEADER FILE EXCEL
+// 3. HEADER EXCEL
 $fileName = "Survey_Report_" . date('Y-m-d_His') . ".xls";
 header("Content-Type: application/vnd.ms-excel");
 header("Content-Disposition: attachment; filename=$fileName");
 header("Pragma: no-cache");
 header("Expires: 0");
 
-// 4. SIAPKAN QUERY SESUAI FILTER
-$whereClause = "";
-$params = [];
+// 4. AMBIL DATA PERTANYAAN (DIFILTER!)
+// Ini perbaikan utamanya: Hanya ambil pertanyaan milik Company terkait
+$sqlQ = "SELECT id, question_text FROM questions";
+$paramsQ = [];
 
-// Jika filter bukan ALL, tambahkan WHERE
 if ($finalFilter !== 'ALL') {
-    $whereClause = "WHERE company_id = ?";
-    $params[] = $finalFilter;
+    $sqlQ .= " WHERE company_id = ?";
+    $paramsQ[] = $finalFilter;
 }
+$sqlQ .= " ORDER BY id ASC";
 
-// Ambil Pertanyaan (Header)
-$questions = $pdo->query("SELECT id, question_text FROM questions ORDER BY id ASC")->fetchAll(PDO::FETCH_ASSOC);
+$stmtQ = $pdo->prepare($sqlQ);
+$stmtQ->execute($paramsQ);
+$questions = $stmtQ->fetchAll(PDO::FETCH_ASSOC);
 
-// Ambil Responden (Data) - DENGAN FILTER
-$sql = "SELECT * FROM respondents $whereClause ORDER BY id DESC";
-$stmt = $pdo->prepare($sql);
-$stmt->execute($params);
-$respondents = $stmt->fetchAll(PDO::FETCH_ASSOC);
+// 5. AMBIL DATA RESPONDEN (DIFILTER!)
+$sqlR = "SELECT * FROM respondents";
+$paramsR = [];
 
-// --- MULAI OUTPUT TABEL (EXCEL) ---
+if ($finalFilter !== 'ALL') {
+    $sqlR .= " WHERE company_id = ?";
+    $paramsR[] = $finalFilter;
+}
+$sqlR .= " ORDER BY id DESC";
+
+$stmtR = $pdo->prepare($sqlR);
+$stmtR->execute($paramsR);
+$respondents = $stmtR->fetchAll(PDO::FETCH_ASSOC);
+
+// --- OUTPUT TABEL EXCEL ---
 echo "<table border='1'>";
 
 // A. HEADER KOLOM
 echo "<tr style='background-color:#f0f0f0; font-weight:bold;'>";
 echo "<td>No</td>";
-echo "<td>Tanggal Submit</td>";
+echo "<td>Tanggal</td>";
 echo "<td>NIK</td>";
 echo "<td>Nama</td>";
 echo "<td>Email</td>";
 echo "<td>Divisi</td>";
-echo "<td>Company</td>";
+echo "<td>Perusahaan</td>";
 
 foreach ($questions as $q) {
-    // Pendekkan judul pertanyaan di header agar rapi
-    $shortText = strlen($q['question_text']) > 60 ? substr($q['question_text'], 0, 57) . '...' : $q['question_text'];
+    // Bersihkan HTML tags dari judul pertanyaan agar rapi di Excel
+    $cleanText = strip_tags($q['question_text']);
+    // Potong jika terlalu panjang
+    $shortText = strlen($cleanText) > 60 ? substr($cleanText, 0, 57) . '...' : $cleanText;
+    
     echo "<td style='background-color:#e0e7ff;'>[Q{$q['id']}] $shortText</td>";
 }
 echo "</tr>";
@@ -73,27 +82,33 @@ $no = 1;
 foreach ($respondents as $resp) {
     echo "<tr>";
     echo "<td>" . $no++ . "</td>";
-    echo "<td>" . $resp['submission_date'] . "</td>"; // Sesuaikan nama kolom tanggal di DB Anda (created_at atau submission_date)
-    echo "<td>'" . $resp['respondent_nik'] . "</td>"; // Tanda kutip ' agar Excel baca sebagai teks
+    echo "<td>" . $resp['submission_date'] . "</td>";
+    echo "<td>'" . $resp['respondent_nik'] . "</td>"; // Pakai kutip satu agar NIK tidak dianggap angka ilmiah
     echo "<td>" . $resp['respondent_name'] . "</td>";
     echo "<td>" . $resp['respondent_email'] . "</td>";
     echo "<td>" . $resp['respondent_division'] . "</td>";
     
-    // Ambil Nama Company (Query langsung biar simpel, walaupun bisa di-JOIN)
+    // Ambil Nama PT
     $stmtC = $pdo->prepare("SELECT name FROM companies WHERE id = ?");
     $stmtC->execute([$resp['company_id']]);
     $compName = $stmtC->fetchColumn();
     echo "<td>" . $compName . "</td>";
 
-    // Ambil Jawaban User Ini
-    // Mengambil semua jawaban responden ini dalam satu tarikan
+    // AMBIL JAWABAN
+    // Kita ambil jawaban user ini
     $stmtAns = $pdo->prepare("SELECT question_id, answer_value FROM answers WHERE respondent_id = ?");
     $stmtAns->execute([$resp['id']]);
-    $answersRaw = $stmtAns->fetchAll(PDO::FETCH_KEY_PAIR); // Hasil: [question_id => value]
+    $answersRaw = $stmtAns->fetchAll(PDO::FETCH_KEY_PAIR); // Format: [question_id => "Jawaban"]
 
-    // Loop sesuai urutan pertanyaan header
+    // LOOP SESUAI KOLOM PERTANYAAN (HEADER)
+    // Ini memastikan jawaban masuk ke kolom yang tepat
     foreach ($questions as $q) {
-        $val = isset($answersRaw[$q['id']]) ? $answersRaw[$q['id']] : '-';
+        $qid = $q['id'];
+        $val = isset($answersRaw[$qid]) ? $answersRaw[$qid] : '-';
+        
+        // Bersihkan karakter aneh yang bisa merusak format Excel
+        $val = str_replace(["\r", "\n"], " ", $val);
+        
         echo "<td>" . htmlspecialchars($val) . "</td>";
     }
 
