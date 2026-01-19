@@ -43,19 +43,21 @@ if (isset($_POST['login'])) {
     $dob_input = $_POST['dob']; 
 
     if (!in_array($nik_input, $allowed_niks)) {
-        $error = "Akses Ditolak. NIK Anda tidak terdaftar sebagai Admin.";
+        // Update wording error message
+        $error = "Akses Ditolak. NIK Anda tidak memiliki izin akses Dashboard.";
     } else {
         $apiResult = checkEmployeeApi($nik_input);
         if ($apiResult['status'] === 'success') {
             $json = $apiResult['data'];
             $empData = null;
-            // Akses data sesuai struktur debug terakhir
+            
+            // Akses data sesuai struktur debug
             if (isset($json['employee']) && is_array($json['employee']) && isset($json['employee'][0])) {
                 $empData = $json['employee'][0];
             }
 
             if (empty($empData)) {
-                $error = "Data NIK tidak ditemukan di API.";
+                $error = "Data NIK tidak ditemukan di sistem.";
             } else {
                 $api_dob_raw = $empData['GBPAS'] ?? null;
                 if ($api_dob_raw) {
@@ -65,17 +67,18 @@ if (isset($_POST['login'])) {
                         if ($dob_input === $dob_api_clean) {
                             $_SESSION['is_admin_logged_in'] = true;
                             $_SESSION['admin_nik'] = $nik_input;
-                            $_SESSION['admin_name'] = $empData['CNAME'] ?? $empData['employee_name'] ?? 'Admin';
+                            // Update nama sesi (menghilangkan kata Admin jika default)
+                            $_SESSION['admin_name'] = $empData['CNAME'] ?? $empData['employee_name'] ?? 'User';
                             header("Location: dashboard.php");
                             exit();
                         } else {
-                            $error = "Tanggal Lahir Salah.";
+                            $error = "Verifikasi Gagal: Tanggal Lahir tidak sesuai.";
                         }
                     } else {
                         $error = "Format tanggal sistem tidak valid.";
                     }
                 } else {
-                    $error = "Data ditemukan, tapi tanggal lahir kosong.";
+                    $error = "Data ditemukan, tapi informasi tanggal lahir kosong.";
                 }
             }
         } else {
@@ -90,36 +93,48 @@ if (isset($_POST['login'])) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Admin Dashboard Login</title>
+    <title>Login Dashboard - IT Survey</title>
+    
+    <link rel="icon" type="image/x-icon" href="favicon/favicon.ico">
+    
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
         body { font-family: 'Plus Jakarta Sans', sans-serif; }
+        .bg-pattern {
+            background-color: #f8fafc;
+            background-image: radial-gradient(#e2e8f0 1px, transparent 1px);
+            background-size: 24px 24px;
+        }
     </style>
 </head>
-<body class="bg-slate-50 min-h-screen flex items-center justify-center p-6 relative overflow-hidden">
+<body class="bg-pattern min-h-screen flex items-center justify-center p-6 relative">
 
-    <div class="absolute top-[-10%] left-[-10%] w-96 h-96 bg-blue-200/30 rounded-full blur-3xl pointer-events-none"></div>
-    <div class="absolute bottom-[-10%] right-[-10%] w-96 h-96 bg-indigo-200/30 rounded-full blur-3xl pointer-events-none"></div>
+    <div class="absolute top-0 left-0 w-full h-96 bg-gradient-to-b from-blue-50 to-transparent pointer-events-none"></div>
 
-    <div class="bg-white w-full max-w-[420px] rounded-3xl shadow-2xl shadow-slate-200/50 border border-slate-100 overflow-hidden relative z-10">
+    <div class="bg-white w-full max-w-[440px] rounded-3xl shadow-xl shadow-slate-200/60 border border-slate-100 relative z-10 overflow-hidden">
         
-        <div class="bg-white p-8 pb-6 text-center">
-            <div class="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white mb-5 shadow-lg shadow-blue-500/30">
-                <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+        <div class="pt-10 pb-6 px-8 text-center bg-white">
+            <div class="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-blue-50 text-blue-600 mb-6 ring-1 ring-blue-100 shadow-sm">
+                <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
             </div>
-            <h1 class="text-2xl font-bold text-slate-800 tracking-tight">Admin Portal</h1>
-            <p class="text-slate-500 text-sm mt-2">Akses aman data survey IT</p>
+            
+            <h1 class="text-2xl font-bold text-slate-900 tracking-tight">
+                IT Dashboard
+            </h1>
+            <p class="text-slate-500 text-sm mt-2 leading-relaxed">
+                Silakan verifikasi identitas Anda untuk mengakses laporan survey.
+            </p>
         </div>
 
         <?php if (!empty($error)): ?>
-            <div class="mx-8 bg-red-50 border border-red-100 text-red-600 p-3 rounded-xl text-xs flex items-start gap-2 animate-pulse">
+            <div class="mx-8 mb-2 bg-red-50 border border-red-100 text-red-600 p-3 rounded-xl text-xs flex items-start gap-2 animate-pulse">
                 <svg class="w-4 h-4 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
                 <span class="font-medium"><?= $error ?></span>
             </div>
         <?php endif; ?>
 
-        <div class="p-8 pt-6">
+        <div class="p-8 pt-2">
             <form method="POST" autocomplete="off" class="space-y-5">
                 
                 <div>
@@ -146,16 +161,16 @@ if (isset($_POST['login'])) {
                     </div>
                 </div>
 
-                <button type="submit" name="login" class="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-4 rounded-xl shadow-xl shadow-slate-900/10 transition-all duration-200 transform hover:-translate-y-0.5 active:scale-[0.98] flex items-center justify-center gap-2 mt-4">
+                <button type="submit" name="login" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-xl shadow-lg shadow-blue-500/20 transition-all duration-200 transform hover:-translate-y-0.5 active:scale-[0.98] flex items-center justify-center gap-2 mt-6">
                     <span>Masuk Dashboard</span>
-                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5l7 7-7 7"/></svg>
+                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
                 </button>
             </form>
         </div>
 
-        <div class="bg-slate-50 p-4 text-center border-t border-slate-100">
-            <a href="index.php" class="text-xs font-medium text-slate-500 hover:text-blue-600 transition-colors inline-flex items-center gap-1">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/></svg>
+        <div class="bg-slate-50 p-5 text-center border-t border-slate-100">
+            <a href="index.php" class="text-xs font-semibold text-slate-500 hover:text-blue-600 transition-colors inline-flex items-center gap-1.5 group">
+                <svg class="group-hover:-translate-x-1 transition-transform" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/></svg>
                 Kembali ke Halaman Survey
             </a>
         </div>
