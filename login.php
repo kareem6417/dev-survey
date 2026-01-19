@@ -4,12 +4,11 @@ session_start();
 // ==========================================
 // 1. CONFIG: WHITELIST (DAFTAR IZIN)
 // ==========================================
-// PENTING: TAMBAHKAN NIK ANDA DI SINI!
 $allowed_niks = [
-    '7366',
+    '7366',    // NIK Anda
     '3839', 
-    '123456', // <--- GANTI INI DENGAN NIK ANDA SENDIRI
-    '999999'
+    '999999',
+    '123456'
 ];
 
 // ==========================================
@@ -19,7 +18,6 @@ define('API_URL_BASE', 'http://mandiricoal.co.id:1880/master/employee/pernr/');
 define('API_KEY', 'ca6cda3462809fc894801c6f84e0cd8ecff93afb');
 
 $error = "";
-$debug_info = "";
 
 // Fungsi Call API
 function checkEmployeeApi($nik) {
@@ -53,11 +51,11 @@ function checkEmployeeApi($nik) {
 // LOGIC LOGIN
 if (isset($_POST['login'])) {
     $nik_input = trim($_POST['nik']);
-    $dob_input = $_POST['dob']; // Format: YYYY-MM-DD
+    $dob_input = $_POST['dob']; // Format Input HTML: YYYY-MM-DD
 
     // 1. Cek Whitelist
     if (!in_array($nik_input, $allowed_niks)) {
-        $error = "Akses Ditolak. NIK <b>$nik_input</b> tidak terdaftar di Whitelist (login.php baris 9).";
+        $error = "Akses Ditolak. NIK Anda tidak terdaftar sebagai Admin.";
     } 
     else {
         // 2. Panggil API
@@ -66,49 +64,45 @@ if (isset($_POST['login'])) {
         if ($apiResult['status'] === 'success') {
             $json = $apiResult['data'];
             
-            // Cek struktur data (Wrapper 'data' atau langsung)
-            $empData = $json['data'] ?? $json;
+            // --- PERBAIKAN STRUKTUR DATA (Sesuai Debug) ---
+            // Data ada di dalam ['employee'][0]
+            $empData = null;
+            if (isset($json['employee']) && is_array($json['employee']) && isset($json['employee'][0])) {
+                $empData = $json['employee'][0];
+            }
 
             if (empty($empData)) {
-                $error = "NIK ada di whitelist, tapi API tidak mengembalikan data karyawan.";
+                $error = "Data NIK tidak ditemukan di API.";
             } else {
-                // 3. Cari Field Tanggal Lahir (Debugging Otomatis)
-                $api_dob = $empData['date_of_birth'] ?? $empData['birthDate'] ?? $empData['tgl_lahir'] ?? $empData['birth_date'] ?? null;
+                // --- PERBAIKAN FIELD TANGGAL LAHIR ---
+                // Field bernama 'GBPAS' dengan format YYYYMMDD (misal: 19940810)
+                $api_dob_raw = $empData['GBPAS'] ?? null;
 
-                // --- DEBUG INFO (Akan muncul jika gagal) ---
-                $debug_info = "
-                    <div class='mt-4 p-3 bg-slate-100 border border-slate-300 rounded text-xs text-left font-mono overflow-auto'>
-                        <strong>[DEBUGGER]</strong><br>
-                        Input NIK: $nik_input<br>
-                        Input DOB: $dob_input<br>
-                        API DOB Found: " . ($api_dob ? $api_dob : '<span class="text-red-600">KOSONG</span>') . "<br>
-                        <hr class='my-2 border-slate-300'>
-                        <strong>Data Mentah API:</strong><br>
-                        <pre>" . print_r($empData, true) . "</pre>
-                    </div>
-                ";
+                if ($api_dob_raw) {
+                    // Konversi format YYYYMMDD (API) menjadi YYYY-MM-DD (Input)
+                    // Contoh: 19940810 -> 1994-08-10
+                    $formatted_api_dob = DateTime::createFromFormat('Ymd', $api_dob_raw);
+                    
+                    if ($formatted_api_dob) {
+                        $dob_api_clean = $formatted_api_dob->format('Y-m-d');
 
-                if ($api_dob) {
-                    try {
-                        $dateInput = new DateTime($dob_input);
-                        $dateApi   = new DateTime($api_dob);
-
-                        if ($dateInput->format('Y-m-d') === $dateApi->format('Y-m-d')) {
-                            // SUKSES
+                        if ($dob_input === $dob_api_clean) {
+                            // --- SUKSES LOGIN ---
                             $_SESSION['is_admin_logged_in'] = true;
                             $_SESSION['admin_nik'] = $nik_input;
-                            $_SESSION['admin_name'] = $empData['employee_name'] ?? $empData['name'] ?? 'Admin';
+                            // Ambil nama dari field 'CNAME' atau 'employee_name'
+                            $_SESSION['admin_name'] = $empData['CNAME'] ?? $empData['employee_name'] ?? 'Admin';
                             
                             header("Location: dashboard.php");
                             exit();
                         } else {
-                            $error = "Tanggal Lahir Tidak Cocok.";
+                            $error = "Tanggal Lahir Salah. <br><small>Input: $dob_input <br>Data Sistem: $dob_api_clean</small>";
                         }
-                    } catch (Exception $e) {
-                        $error = "Format tanggal API tidak valid: " . $api_dob;
+                    } else {
+                        $error = "Format tanggal di sistem tidak valid ($api_dob_raw).";
                     }
                 } else {
-                    $error = "Data API ditemukan, tapi field Tanggal Lahir kosong.";
+                    $error = "Data ditemukan, tapi tanggal lahir (GBPAS) kosong.";
                 }
             }
         } else {
@@ -130,7 +124,7 @@ if (isset($_POST['login'])) {
 </head>
 <body class="bg-slate-100 min-h-screen flex items-center justify-center p-4">
 
-    <div class="bg-white w-full max-w-[450px] p-8 rounded-2xl shadow-xl border border-slate-200">
+    <div class="bg-white w-full max-w-[400px] p-8 rounded-2xl shadow-xl border border-slate-200">
         
         <div class="text-center mb-8">
             <h1 class="text-2xl font-bold text-slate-800">Dashboard Login</h1>
@@ -138,14 +132,9 @@ if (isset($_POST['login'])) {
         </div>
 
         <?php if (!empty($error)): ?>
-            <div class="bg-red-50 border border-red-100 text-red-600 p-4 rounded-lg text-sm mb-6">
-                <div class="flex items-center gap-2 font-bold mb-1">
-                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                    Login Gagal
-                </div>
-                <?= $error ?>
-                
-                <?= $debug_info ?>
+            <div class="bg-red-50 border border-red-100 text-red-600 p-4 rounded-lg text-sm mb-6 flex items-start gap-2">
+                <svg class="w-5 h-5 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+                <span><?= $error ?></span>
             </div>
         <?php endif; ?>
 
