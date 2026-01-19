@@ -14,20 +14,16 @@ $adminName = $_SESSION['admin_name'] ?? 'Admin';
 $adminScope = $_SESSION['admin_scope'] ?? 0; // 'ALL' atau ID Company (3, 5, dll)
 
 // 3. Logika Filter Query
-// Jika Super Admin, cek apakah dia sedang memilih filter dari dropdown?
 $currentFilter = $adminScope;
 if ($adminScope === 'ALL' && isset($_GET['filter_company']) && $_GET['filter_company'] !== 'ALL') {
-    $currentFilter = $_GET['filter_company']; // Super admin sedang memfilter view
+    $currentFilter = $_GET['filter_company'];
 }
 
 // Persiapkan potongan SQL WHERE
-// Query default (tanpa filter)
 $whereClause = ""; 
 $params = [];
 
-// Jika bukan 'ALL', tambahkan filter by company_id
 if ($currentFilter !== 'ALL') {
-    // Kita filter berdasarkan tabel respondents
     $whereClause = " WHERE company_id = ? ";
     $params = [$currentFilter];
 }
@@ -43,51 +39,49 @@ $stmt->execute($params);
 $totalRespondents = $stmt->fetchColumn();
 
 // B. Chart Statistik Perusahaan
-// Jika user adalah Admin PT (bukan ALL), chart ini hanya menampilkan 1 bar saja (PT dia sendiri)
 $sqlStats = "SELECT company_id, COUNT(*) as count FROM respondents " . $whereClause . " GROUP BY company_id";
 $stmtStats = $pdo->prepare($sqlStats);
 $stmtStats->execute($params);
 $companyStatsRaw = $stmtStats->fetchAll(PDO::FETCH_KEY_PAIR);
 
-// Ambil Nama Perusahaan
+// Ambil Daftar Perusahaan
 $companies = $pdo->query("SELECT id, name, code FROM companies")->fetchAll(PDO::FETCH_ASSOC);
+
+// --- [BARU] Buat Mapping ID ke Nama PT untuk Banner ---
+$companyNamesMap = [];
+foreach ($companies as $c) {
+    // Kita simpan: ID => Nama PT (contoh: 3 => 'PT. Maritim Prima Mandiri')
+    $companyNamesMap[$c['id']] = $c['name']; 
+}
+
+// Siapkan Data Chart
 $companyLabels = [];
 $companyData = [];
 $companyColors = ['#3b82f6', '#8b5cf6', '#ec4899', '#f43f5e', '#f97316', '#eab308', '#22c55e'];
 
 foreach ($companies as $comp) {
-    // Logika Tampilan Chart:
-    // Tampilkan label perusahaan JIKA: 
-    // 1. User adalah Super Admin (melihat semua)
-    // 2. ATAU User adalah Admin PT tersebut
     if ($currentFilter === 'ALL' || $currentFilter == $comp['id']) {
         $companyLabels[] = $comp['code'] ?: $comp['name'];
         $companyData[] = $companyStatsRaw[$comp['id']] ?? 0;
     }
 }
 
-// C. Data Jawaban (Detail Chart per Pertanyaan)
-// Query questions tetap sama (ambil semua pertanyaan)
+// C. Data Jawaban
 $questions = $pdo->query("SELECT * FROM questions ORDER BY id ASC")->fetchAll(PDO::FETCH_ASSOC);
 
-// Fungsi Helper untuk hitung jawaban dengan Filter Company
 function getAnswerStats($pdo, $question_id, $filterCompanyId) {
-    // Kita harus JOIN ke tabel respondents untuk tahu company_id nya
     $sql = "SELECT a.answer_value, COUNT(*) as count 
             FROM answers a 
             JOIN respondents r ON a.respondent_id = r.id 
             WHERE a.question_id = ?";
-    
     $queryParams = [$question_id];
 
-    // Tambahkan filter jika ada
     if ($filterCompanyId !== 'ALL') {
         $sql .= " AND r.company_id = ?";
         $queryParams[] = $filterCompanyId;
     }
 
     $sql .= " GROUP BY a.answer_value";
-
     $stmt = $pdo->prepare($sql);
     $stmt->execute($queryParams);
     return $stmt->fetchAll(PDO::FETCH_KEY_PAIR);
@@ -164,8 +158,11 @@ function getAnswerStats($pdo, $question_id, $filterCompanyId) {
                 <div>
                     <p class="font-bold text-sm">Menampilkan Data Terfilter</p>
                     <p class="text-xs mt-1 opacity-80">
-                        Anda sedang melihat hasil survey khusus untuk perusahaan dengan ID: <strong><?= $currentFilter ?></strong>.
-                        <?php if($adminScope !== 'ALL') echo "(Akses Anda terbatas hanya untuk perusahaan ini)"; ?>
+                        Anda sedang melihat hasil survey khusus untuk: 
+                        <strong>
+                            <?= isset($companyNamesMap[$currentFilter]) ? htmlspecialchars($companyNamesMap[$currentFilter]) : $currentFilter ?>
+                        </strong>
+                        <?php if($adminScope !== 'ALL') echo "(Akses Terbatas)"; ?>
                     </p>
                 </div>
             </div>
@@ -177,7 +174,7 @@ function getAnswerStats($pdo, $question_id, $filterCompanyId) {
                     <p class="text-sm font-medium text-slate-500 mb-1">Total Responden</p>
                     <h2 class="text-4xl font-bold text-slate-800"><?php echo number_format($totalRespondents); ?></h2>
                     <p class="text-xs text-slate-400 mt-2">
-                        <?= ($currentFilter === 'ALL') ? 'Dari semua perusahaan' : 'Dari perusahaan terpilih' ?>
+                        <?= ($currentFilter === 'ALL') ? 'Semua Perusahaan' : (isset($companyNamesMap[$currentFilter]) ? $companyNamesMap[$currentFilter] : 'Perusahaan Terpilih') ?>
                     </p>
                 </div>
                 <div class="bg-blue-50 p-4 rounded-xl text-blue-600">
@@ -201,9 +198,7 @@ function getAnswerStats($pdo, $question_id, $filterCompanyId) {
         
         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             <?php foreach ($questions as $q): 
-                // PANGGIL FUNGSI STATS DENGAN FILTER
                 $stats = getAnswerStats($pdo, $q['id'], $currentFilter);
-                
                 $chartId = "chart_" . $q['id'];
                 $labels = array_keys($stats);
                 $values = array_values($stats);
