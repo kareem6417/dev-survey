@@ -120,7 +120,7 @@ if (isset($_POST['login'])) {
             </div>
             
             <h1 class="text-2xl font-bold text-slate-900 tracking-tight">
-                IT Dashboard
+                Dashboard Survey IT
             </h1>
             <p class="text-slate-500 text-sm mt-2 leading-relaxed">
                 Silakan verifikasi identitas Anda untuk mengakses laporan survey.
