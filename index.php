@@ -290,7 +290,7 @@ $companies = $stmt->fetchAll(PDO::FETCH_ASSOC);
         </div>
 
         <div class="bg-slate-50 px-8 py-4 border-t border-slate-100 flex justify-center">
-            <p class="text-xs text-slate-400 font-semibold tracking-wide">© 2026 IT Ops Department</p>
+            <p class="text-xs text-slate-400 font-semibold tracking-wide">© 2026 IT Operations Department</p>
         </div>
     </div>
 
