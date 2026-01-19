@@ -1,18 +1,25 @@
 <?php
 session_start();
 
+// ==========================================
+// 1. CONFIG: WHITELIST (DAFTAR IZIN)
+// ==========================================
+// PENTING: TAMBAHKAN NIK ANDA DI SINI!
 $allowed_niks = [
     '7366',
-    '3839',
-    '123456',
+    '3839', 
+    '123456', // <--- GANTI INI DENGAN NIK ANDA SENDIRI
     '999999'
 ];
 
+// ==========================================
+// 2. CONFIG: API
+// ==========================================
 define('API_URL_BASE', 'http://mandiricoal.co.id:1880/master/employee/pernr/');
 define('API_KEY', 'ca6cda3462809fc894801c6f84e0cd8ecff93afb');
 
 $error = "";
-$debug_info = ""; // Variabel untuk menampung info debug
+$debug_info = "";
 
 // Fungsi Call API
 function checkEmployeeApi($nik) {
@@ -37,7 +44,7 @@ function checkEmployeeApi($nik) {
     $data = json_decode($response, true);
     
     if (json_last_error() !== JSON_ERROR_NONE) {
-        return ['status' => 'error', 'message' => 'Respon bukan JSON valid. Raw: ' . substr($response, 0, 100)];
+        return ['status' => 'error', 'message' => 'Respon server bukan JSON valid.'];
     }
 
     return ['status' => 'success', 'data' => $data];
@@ -50,7 +57,7 @@ if (isset($_POST['login'])) {
 
     // 1. Cek Whitelist
     if (!in_array($nik_input, $allowed_niks)) {
-        $error = "Akses Ditolak. NIK <b>$nik_input</b> tidak terdaftar di script `login.php` baris 8.";
+        $error = "Akses Ditolak. NIK <b>$nik_input</b> tidak terdaftar di Whitelist (login.php baris 9).";
     } 
     else {
         // 2. Panggil API
@@ -63,25 +70,23 @@ if (isset($_POST['login'])) {
             $empData = $json['data'] ?? $json;
 
             if (empty($empData)) {
-                $error = "NIK ditemukan di whitelist, tapi API mengembalikan data kosong.";
+                $error = "NIK ada di whitelist, tapi API tidak mengembalikan data karyawan.";
             } else {
                 // 3. Cari Field Tanggal Lahir (Debugging Otomatis)
                 $api_dob = $empData['date_of_birth'] ?? $empData['birthDate'] ?? $empData['tgl_lahir'] ?? $empData['birth_date'] ?? null;
 
-                // --- DEBUGGING START ---
-                // Kode ini akan memperlihatkan data asli dari API jika login gagal
+                // --- DEBUG INFO (Akan muncul jika gagal) ---
                 $debug_info = "
-                    <div class='mt-4 p-3 bg-gray-100 border border-gray-300 rounded text-xs text-left font-mono overflow-auto'>
-                        <strong>[DEBUG INFO]</strong><br>
+                    <div class='mt-4 p-3 bg-slate-100 border border-slate-300 rounded text-xs text-left font-mono overflow-auto'>
+                        <strong>[DEBUGGER]</strong><br>
                         Input NIK: $nik_input<br>
                         Input DOB: $dob_input<br>
-                        API DOB Found: " . ($api_dob ? $api_dob : '<span class="text-red-600">NULL (Tidak ketemu)</span>') . "<br>
-                        <hr class='my-2 border-gray-300'>
-                        <strong>Data Mentah dari API:</strong><br>
+                        API DOB Found: " . ($api_dob ? $api_dob : '<span class="text-red-600">KOSONG</span>') . "<br>
+                        <hr class='my-2 border-slate-300'>
+                        <strong>Data Mentah API:</strong><br>
                         <pre>" . print_r($empData, true) . "</pre>
                     </div>
                 ";
-                // --- DEBUGGING END ---
 
                 if ($api_dob) {
                     try {
@@ -147,21 +152,22 @@ if (isset($_POST['login'])) {
         <form method="POST" autocomplete="off">
             <div class="mb-5">
                 <label class="block text-sm font-semibold text-slate-700 mb-2">NIK</label>
-                <input type="text" name="nik" placeholder="Masukan NIK" class="w-full px-4 py-3 bg-slate-50 border border-slate-300 rounded-lg focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition" required>
+                <input type="text" name="nik" placeholder="Masukan NIK" class="w-full px-4 py-3 bg-slate-50 border border-slate-300 rounded-lg focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition font-medium text-slate-800" required>
             </div>
 
             <div class="mb-8">
                 <label class="block text-sm font-semibold text-slate-700 mb-2">Tanggal Lahir</label>
-                <input type="date" name="dob" class="w-full px-4 py-3 bg-slate-50 border border-slate-300 rounded-lg focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition" required>
+                <input type="date" name="dob" class="w-full px-4 py-3 bg-slate-50 border border-slate-300 rounded-lg focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition font-medium text-slate-800" required>
             </div>
 
-            <button type="submit" name="login" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-xl transition shadow-lg shadow-blue-500/30">
+            <button type="submit" name="login" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-xl transition shadow-lg shadow-blue-500/30 flex justify-center items-center gap-2">
                 Masuk Dashboard
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
             </button>
         </form>
 
         <div class="mt-8 text-center pt-6 border-t border-slate-100">
-            <a href="index.php" class="text-sm font-medium text-slate-500 hover:text-blue-600">Kembali ke Survey</a>
+            <a href="index.php" class="text-sm font-medium text-slate-500 hover:text-blue-600 transition">Kembali ke Survey</a>
         </div>
     </div>
 
