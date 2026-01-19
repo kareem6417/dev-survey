@@ -1,7 +1,7 @@
 <?php
 session_start();
 
-// Cek Sesi
+// 1. Cek Sesi Login
 if (!isset($_SESSION['is_admin_logged_in']) || $_SESSION['is_admin_logged_in'] !== true) {
     header("Location: login.php");
     exit();
@@ -9,16 +9,45 @@ if (!isset($_SESSION['is_admin_logged_in']) || $_SESSION['is_admin_logged_in'] !
 
 require 'config.php';
 
-// Ambil Nama Admin dari sesi (jika ada)
+// 2. Ambil Info User & Hak Akses
 $adminName = $_SESSION['admin_name'] ?? 'Admin';
+$adminScope = $_SESSION['admin_scope'] ?? 0; // 'ALL' atau ID Company (3, 5, dll)
 
-// Total Responden
-$stmt = $pdo->query("SELECT COUNT(*) FROM respondents");
+// 3. Logika Filter Query
+// Jika Super Admin, cek apakah dia sedang memilih filter dari dropdown?
+$currentFilter = $adminScope;
+if ($adminScope === 'ALL' && isset($_GET['filter_company']) && $_GET['filter_company'] !== 'ALL') {
+    $currentFilter = $_GET['filter_company']; // Super admin sedang memfilter view
+}
+
+// Persiapkan potongan SQL WHERE
+// Query default (tanpa filter)
+$whereClause = ""; 
+$params = [];
+
+// Jika bukan 'ALL', tambahkan filter by company_id
+if ($currentFilter !== 'ALL') {
+    // Kita filter berdasarkan tabel respondents
+    $whereClause = " WHERE company_id = ? ";
+    $params = [$currentFilter];
+}
+
+// -----------------------------------------------------------
+// 4. QUERY DATA
+// -----------------------------------------------------------
+
+// A. Total Responden
+$sqlTotal = "SELECT COUNT(*) FROM respondents" . $whereClause;
+$stmt = $pdo->prepare($sqlTotal);
+$stmt->execute($params);
 $totalRespondents = $stmt->fetchColumn();
 
-// Responden per Perusahaan
-$stmt = $pdo->query("SELECT company_id, COUNT(*) as count FROM respondents GROUP BY company_id");
-$companyStatsRaw = $stmt->fetchAll(PDO::FETCH_KEY_PAIR);
+// B. Chart Statistik Perusahaan
+// Jika user adalah Admin PT (bukan ALL), chart ini hanya menampilkan 1 bar saja (PT dia sendiri)
+$sqlStats = "SELECT company_id, COUNT(*) as count FROM respondents " . $whereClause . " GROUP BY company_id";
+$stmtStats = $pdo->prepare($sqlStats);
+$stmtStats->execute($params);
+$companyStatsRaw = $stmtStats->fetchAll(PDO::FETCH_KEY_PAIR);
 
 // Ambil Nama Perusahaan
 $companies = $pdo->query("SELECT id, name, code FROM companies")->fetchAll(PDO::FETCH_ASSOC);
@@ -27,17 +56,40 @@ $companyData = [];
 $companyColors = ['#3b82f6', '#8b5cf6', '#ec4899', '#f43f5e', '#f97316', '#eab308', '#22c55e'];
 
 foreach ($companies as $comp) {
-    $companyLabels[] = $comp['code'] ?: $comp['name'];
-    $companyData[] = $companyStatsRaw[$comp['id']] ?? 0;
+    // Logika Tampilan Chart:
+    // Tampilkan label perusahaan JIKA: 
+    // 1. User adalah Super Admin (melihat semua)
+    // 2. ATAU User adalah Admin PT tersebut
+    if ($currentFilter === 'ALL' || $currentFilter == $comp['id']) {
+        $companyLabels[] = $comp['code'] ?: $comp['name'];
+        $companyData[] = $companyStatsRaw[$comp['id']] ?? 0;
+    }
 }
 
-// Ambil Data Pertanyaan
+// C. Data Jawaban (Detail Chart per Pertanyaan)
+// Query questions tetap sama (ambil semua pertanyaan)
 $questions = $pdo->query("SELECT * FROM questions ORDER BY id ASC")->fetchAll(PDO::FETCH_ASSOC);
 
-// Fungsi Helper Persentase
-function getAnswerStats($pdo, $question_id) {
-    $stmt = $pdo->prepare("SELECT answer_value, COUNT(*) as count FROM answers WHERE question_id = ? GROUP BY answer_value");
-    $stmt->execute([$question_id]);
+// Fungsi Helper untuk hitung jawaban dengan Filter Company
+function getAnswerStats($pdo, $question_id, $filterCompanyId) {
+    // Kita harus JOIN ke tabel respondents untuk tahu company_id nya
+    $sql = "SELECT a.answer_value, COUNT(*) as count 
+            FROM answers a 
+            JOIN respondents r ON a.respondent_id = r.id 
+            WHERE a.question_id = ?";
+    
+    $queryParams = [$question_id];
+
+    // Tambahkan filter jika ada
+    if ($filterCompanyId !== 'ALL') {
+        $sql .= " AND r.company_id = ?";
+        $queryParams[] = $filterCompanyId;
+    }
+
+    $sql .= " GROUP BY a.answer_value";
+
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($queryParams);
     return $stmt->fetchAll(PDO::FETCH_KEY_PAIR);
 }
 ?>
@@ -47,7 +99,8 @@ function getAnswerStats($pdo, $question_id) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dashboard Hasil Survey</title>
+    <title>Dashboard Survey - <?= htmlspecialchars($adminName) ?></title>
+    <link rel="icon" type="image/x-icon" href="favicon/favicon.ico">
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -57,21 +110,46 @@ function getAnswerStats($pdo, $question_id) {
 
     <nav class="bg-white border-b border-slate-200 sticky top-0 z-50 shadow-sm">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div class="flex justify-between h-16">
-                <div class="flex items-center gap-3">
-                    <div class="bg-blue-600 text-white p-2 rounded-lg">
+            <div class="flex flex-col md:flex-row justify-between h-auto md:h-16 py-3 md:py-0 items-center gap-4">
+                <div class="flex items-center gap-3 w-full md:w-auto">
+                    <div class="bg-blue-600 text-white p-2 rounded-lg shrink-0">
                         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg>
                     </div>
                     <div>
-                        <h1 class="text-lg font-bold text-slate-800 leading-none">IT Survey Dashboard</h1>
-                        <p class="text-xs text-slate-500 mt-0.5">Welcome, <?= htmlspecialchars($adminName) ?></p>
+                        <h1 class="text-lg font-bold text-slate-800 leading-none">IT Dashboard</h1>
+                        <p class="text-xs text-slate-500 mt-0.5">
+                            Halo, <?= htmlspecialchars($adminName) ?> 
+                            <?php if($adminScope === 'ALL'): ?>
+                                <span class="bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded text-[10px] font-bold ml-1">SUPER ADMIN</span>
+                            <?php else: ?>
+                                <span class="bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded text-[10px] font-bold ml-1">ADMIN PT</span>
+                            <?php endif; ?>
+                        </p>
                     </div>
                 </div>
 
-                <div class="flex items-center">
+                <?php if ($adminScope === 'ALL'): ?>
+                <form method="GET" class="w-full md:w-auto flex items-center">
+                    <div class="relative w-full md:w-64">
+                        <select name="filter_company" onchange="this.form.submit()" class="w-full appearance-none bg-slate-50 border border-slate-200 text-slate-700 py-2 pl-4 pr-8 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer font-medium">
+                            <option value="ALL" <?= $currentFilter === 'ALL' ? 'selected' : '' ?>>Semua Perusahaan</option>
+                            <?php foreach ($companies as $comp): ?>
+                                <option value="<?= $comp['id'] ?>" <?= $currentFilter == $comp['id'] ? 'selected' : '' ?>>
+                                    <?= $comp['code'] ?: $comp['name'] ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                        <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-slate-500">
+                            <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+                        </div>
+                    </div>
+                </form>
+                <?php endif; ?>
+
+                <div class="flex items-center w-full md:w-auto justify-end">
                     <a href="logout.php" class="flex items-center gap-2 px-4 py-2 text-sm font-medium text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition-colors border border-red-100">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
                         Keluar
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
                     </a>
                 </div>
             </div>
@@ -80,11 +158,27 @@ function getAnswerStats($pdo, $question_id) {
 
     <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         
+        <?php if ($currentFilter !== 'ALL'): ?>
+            <div class="bg-blue-50 border border-blue-100 text-blue-700 px-4 py-3 rounded-xl mb-6 flex items-start gap-3">
+                <svg class="w-5 h-5 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                <div>
+                    <p class="font-bold text-sm">Menampilkan Data Terfilter</p>
+                    <p class="text-xs mt-1 opacity-80">
+                        Anda sedang melihat hasil survey khusus untuk perusahaan dengan ID: <strong><?= $currentFilter ?></strong>.
+                        <?php if($adminScope !== 'ALL') echo "(Akses Anda terbatas hanya untuk perusahaan ini)"; ?>
+                    </p>
+                </div>
+            </div>
+        <?php endif; ?>
+
         <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
             <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex items-center justify-between">
                 <div>
                     <p class="text-sm font-medium text-slate-500 mb-1">Total Responden</p>
                     <h2 class="text-4xl font-bold text-slate-800"><?php echo number_format($totalRespondents); ?></h2>
+                    <p class="text-xs text-slate-400 mt-2">
+                        <?= ($currentFilter === 'ALL') ? 'Dari semua perusahaan' : 'Dari perusahaan terpilih' ?>
+                    </p>
                 </div>
                 <div class="bg-blue-50 p-4 rounded-xl text-blue-600">
                     <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
@@ -101,14 +195,16 @@ function getAnswerStats($pdo, $question_id) {
 
         <div class="border-t border-slate-200 my-8"></div>
 
-        <h2 class="text-2xl font-bold text-slate-800 mb-6">Analisa Jawaban</h2>
+        <div class="flex items-center justify-between mb-6">
+            <h2 class="text-2xl font-bold text-slate-800">Analisa Jawaban</h2>
+        </div>
         
         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             <?php foreach ($questions as $q): 
-                $stats = getAnswerStats($pdo, $q['id']);
-                $chartId = "chart_" . $q['id'];
+                // PANGGIL FUNGSI STATS DENGAN FILTER
+                $stats = getAnswerStats($pdo, $q['id'], $currentFilter);
                 
-                // Siapkan data chart
+                $chartId = "chart_" . $q['id'];
                 $labels = array_keys($stats);
                 $values = array_values($stats);
                 $type = $q['input_type']; 

@@ -1,19 +1,16 @@
 <?php
 session_start();
 
-// ==========================================
-// 1. CONFIG: WHITELIST (DAFTAR IZIN)
-// ==========================================
-$allowed_niks = [
-    '7366',    // NIK Anda
-    '3839', 
-    '999999',
-    '123456'
+
+$admin_roles = [
+    '7366'   => 'ALL',
+    '3839'   => 3,
+    '123456' => 5,
+    '999999' => 6
 ];
 
-// ==========================================
-// 2. CONFIG: API
-// ==========================================
+$allowed_niks = array_keys($admin_roles);
+
 define('API_URL_BASE', 'http://mandiricoal.co.id:1880/master/employee/pernr/');
 define('API_KEY', 'ca6cda3462809fc894801c6f84e0cd8ecff93afb');
 
@@ -67,8 +64,10 @@ if (isset($_POST['login'])) {
                         if ($dob_input === $dob_api_clean) {
                             $_SESSION['is_admin_logged_in'] = true;
                             $_SESSION['admin_nik'] = $nik_input;
-                            // Update nama sesi (menghilangkan kata Admin jika default)
                             $_SESSION['admin_name'] = $empData['CNAME'] ?? $empData['employee_name'] ?? 'User';
+                            
+                            $_SESSION['admin_scope'] = $admin_roles[$nik_input]; 
+                            
                             header("Location: dashboard.php");
                             exit();
                         } else {
