@@ -1,25 +1,18 @@
 <?php
 session_start();
 
-// ==========================================
-// 1. CONFIG: DAFTAR AKSES DASHBOARD
-// ==========================================
 $allowed_niks = [
     '7366',
     '3839', 
-    '999999',
-    '123456' // Masukan NIK Anda di sini
 ];
 
-// ==========================================
-// 2. CONFIG: API (Sesuai handler.php)
-// ==========================================
+
 define('API_URL_BASE', 'http://mandiricoal.co.id:1880/master/employee/pernr/');
 define('API_KEY', 'ca6cda3462809fc894801c6f84e0cd8ecff93afb');
 
 $error = "";
 
-// Fungsi Call API (Mengadopsi logic handler.php)
+// Fungsi Call API
 function checkEmployeeApi($nik) {
     $url = API_URL_BASE . $nik;
     
@@ -28,7 +21,6 @@ function checkEmployeeApi($nik) {
         CURLOPT_URL => $url,
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_TIMEOUT => 10,
-        // KUNCI PERBAIKAN: Header harus 'api_key', bukan 'x-api-key'
         CURLOPT_HTTPHEADER => array("api_key: " . API_KEY),
     ));
 
@@ -42,9 +34,9 @@ function checkEmployeeApi($nik) {
 
     $data = json_decode($response, true);
     
-    // Validasi apakah JSON valid
+    // Validasi JSON
     if (json_last_error() !== JSON_ERROR_NONE) {
-        return ['status' => 'error', 'message' => 'Format data server tidak valid.'];
+        return ['status' => 'error', 'message' => 'Respon server bukan JSON valid.'];
     }
 
     return ['status' => 'success', 'data' => $data];
@@ -53,60 +45,65 @@ function checkEmployeeApi($nik) {
 // LOGIC LOGIN
 if (isset($_POST['login'])) {
     $nik_input = trim($_POST['nik']);
-    $dob_input = $_POST['dob']; // Format input: YYYY-MM-DD
+    $dob_input = $_POST['dob']; // Format: YYYY-MM-DD
 
-    // 1. Cek Kelengkapan
+    // 1. Cek Input Kosong
     if (empty($nik_input) || empty($dob_input)) {
         $error = "NIK dan Tanggal Lahir wajib diisi.";
     } 
-    // 2. Cek Whitelist (Hanya NIK tertentu yang boleh masuk Dashboard)
+    // 2. Cek Whitelist
     elseif (!in_array($nik_input, $allowed_niks)) {
-        $error = "Akses Ditolak. NIK Anda tidak memiliki izin akses Dashboard.";
+        $error = "Akses Ditolak. NIK $nik_input tidak memiliki izin akses Dashboard.";
     } 
     else {
         // 3. Panggil API
         $apiResult = checkEmployeeApi($nik_input);
 
         if ($apiResult['status'] === 'success') {
-            $empData = $apiResult['data'];
+            $json = $apiResult['data']; // Ini adalah seluruh JSON response
+
+            // Cek status dari body response API (biasanya ada field status atau data)
+            // Struktur biasanya: { status: 'success', data: { ... } } atau langsung { ...data... }
             
-            // Cek apakah data karyawan ditemukan (biasanya API return object kosong atau status false jika tidak ada)
-            // Asumsi: jika field 'pernr' atau 'name' ada, berarti sukses.
-            if (empty($empData)) {
-                $error = "Data NIK tidak ditemukan di sistem.";
+            // Kita coba cari object datanya
+            $empData = null;
+            if (isset($json['data'])) {
+                $empData = $json['data'];
             } else {
-                // 4. Ambil Tanggal Lahir dari API
-                // Mencari field tanggal lahir (date_of_birth, birthDate, tgl_lahir, dll)
+                // Fallback jika API langsung mengembalikan data karyawan tanpa wrapper 'data'
+                $empData = $json;
+            }
+
+            if (empty($empData)) {
+                $error = "Data NIK tidak ditemukan di sistem API.";
+            } else {
+                // 4. Ambil Tanggal Lahir (Cari berbagai kemungkinan nama field)
                 $api_dob = $empData['date_of_birth'] ?? $empData['birthDate'] ?? $empData['tgl_lahir'] ?? null;
-                
-                // Jika field ada di dalam properti 'data' (nested)
-                if (!$api_dob && isset($empData['data'])) {
-                     $api_dob = $empData['data']['date_of_birth'] ?? $empData['data']['birthDate'] ?? null;
-                }
 
                 if ($api_dob) {
                     try {
-                        // Normalisasi Tanggal (Bandingkan format Y-m-d)
+                        // Normalisasi Tanggal
                         $dateInput = new DateTime($dob_input);
                         $dateApi   = new DateTime($api_dob);
 
+                        // Bandingkan
                         if ($dateInput->format('Y-m-d') === $dateApi->format('Y-m-d')) {
                             // --- LOGIN SUKSES ---
                             $_SESSION['is_admin_logged_in'] = true;
                             $_SESSION['admin_nik'] = $nik_input;
-                            $_SESSION['admin_name'] = $empData['employee_name'] ?? $empData['name'] ?? 'User';
+                            $_SESSION['admin_name'] = $empData['employee_name'] ?? $empData['name'] ?? 'Admin';
                             
                             header("Location: dashboard.php");
                             exit();
                         } else {
-                            $error = "Verifikasi Gagal. Tanggal lahir tidak sesuai data sistem.";
+                            // Tampilkan error detail untuk debugging user
+                            $error = "Tanggal lahir salah. <br><small>Input: $dob_input <br>Data Sistem: " . $dateApi->format('Y-m-d') . "</small>";
                         }
                     } catch (Exception $e) {
-                        $error = "Format tanggal pada sistem tidak valid.";
+                        $error = "Format tanggal sistem tidak valid: " . $api_dob;
                     }
                 } else {
-                    // Fallback jika API tidak memberikan field tanggal lahir
-                    $error = "Data ditemukan, namun informasi Tanggal Lahir kosong di sistem.";
+                    $error = "Data ditemukan, tapi field Tanggal Lahir kosong.";
                 }
             }
         } else {
@@ -174,7 +171,7 @@ if (isset($_POST['login'])) {
                 <p class="text-xs text-slate-400 mt-1 text-right italic">*Sesuai data HC/SAP</p>
             </div>
 
-            <button type="submit" name="login" class="w-full bg-slate-900 hover:bg-slate-800 text-white font-semibold py-3 rounded-xl transition-all duration-200 transform active:scale-[0.98] shadow-lg shadow-slate-300/50 flex items-center justify-center gap-2">
+            <button type="submit" name="login" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-xl transition-all duration-200 transform active:scale-[0.98] shadow-lg shadow-blue-500/30 flex items-center justify-center gap-2">
                 <span>Masuk Dashboard</span>
                 <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
             </button>
