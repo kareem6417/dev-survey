@@ -5,8 +5,8 @@ session_start();
 $admin_roles = [
     '7366'   => 'ALL',
     '3839'   => 3,
-    '123456' => 5,
-    '999999' => 6
+    '80018648' => 5,
+    '897' => 3
 ];
 
 $allowed_niks = array_keys($admin_roles);
