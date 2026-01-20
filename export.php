@@ -1,15 +1,15 @@
 <?php
-// 1. BUFFERING: Mencegah error "Headers already sent" atau sampah text
+// BUFFERING: Mencegah error output sebelum download
 ob_start();
 session_start();
 require 'config.php';
 
-// 2. CEK KEAMANAN
+// 1. CEK KEAMANAN
 if (!isset($_SESSION['is_admin_logged_in']) || $_SESSION['is_admin_logged_in'] !== true) {
     die("Akses Ditolak. Harap login terlebih dahulu.");
 }
 
-// 3. FILTER & HAK AKSES
+// 2. FILTER & HAK AKSES
 $adminScope = $_SESSION['admin_scope'] ?? 0;
 $filterInput = $_GET['filter_company'] ?? 'ALL';
 
@@ -21,10 +21,10 @@ if ($adminScope === 'ALL') {
 }
 
 // ============================================================
-// 4. LOGIKA PERAMPINGAN PERTANYAAN (MERGE QUESTION TEXT)
+// 3. LOGIKA MERGING PERTANYAAN (AGAR TIDAK BERULANG)
 // ============================================================
 
-// [FIX] Hapus 'sort_order' karena tidak ada di database Anda
+// Ambil pertanyaan (Filter sesuai hak akses/pilihan)
 $sqlQ = "SELECT id, question_text FROM questions";
 $paramsQ = [];
 
@@ -32,37 +32,45 @@ if ($finalFilter !== 'ALL') {
     $sqlQ .= " WHERE company_id = ?";
     $paramsQ[] = $finalFilter;
 }
-// [FIX] Order by ID saja
-$sqlQ .= " ORDER BY id ASC"; 
+// Urutkan berdasarkan Teks agar pertanyaan yang sama berkumpul
+$sqlQ .= " ORDER BY question_text ASC, id ASC"; 
 
 $stmtQ = $pdo->prepare($sqlQ);
 $stmtQ->execute($paramsQ);
 $allQuestions = $stmtQ->fetchAll(PDO::FETCH_ASSOC);
 
-// MAPPING: ID Pertanyaan -> Key Teks Unik
-$questionIdToTextMap = []; 
-$uniqueHeaders = []; 
+// MAPPING & HEADER PREPARATION
+$questionIdToKeyMap = []; // Map ID Pertanyaan -> Key Unik
+$uniqueHeaders = [];      // Daftar Header Unik (Key -> Label Asli)
 
 foreach ($allQuestions as $q) {
-    // Bersihkan teks agar pertanyaan yang sama dari PT berbeda bisa dianggap satu grup
-    $cleanTextRaw = strip_tags($q['question_text']);
-    $cleanTextRaw = preg_replace('/\s+/', ' ', $cleanTextRaw); 
-    $cleanKey = trim(strtolower($cleanTextRaw)); 
+    // BERSIHKAN TEKS SEBERSIH-BERSIHNYA
+    $raw = $q['question_text'];
+    $raw = html_entity_decode($raw);       // Ubah &nbsp; jadi spasi
+    $raw = strip_tags($raw);               // Hapus tag HTML
+    $raw = preg_replace('/\s+/', ' ', $raw); // Hapus spasi ganda/enter
+    $raw = trim($raw);                     // Hapus spasi depan/belakang
     
-    // Label Header Asli
-    $headerLabel = trim(strip_tags($q['question_text']));
+    // Key Unik (Huruf kecil semua)
+    $cleanKey = strtolower($raw); 
+    
+    // Map ID -> Key (Contoh: ID 10 -> "internet", ID 55 -> "internet")
+    $questionIdToKeyMap[$q['id']] = $cleanKey;
 
-    // Simpan Mapping
-    $questionIdToTextMap[$q['id']] = $cleanKey;
-
-    // Simpan Header Unik (Gunakan Key agar pertanyaan duplicate jadi 1 kolom)
+    // Simpan Header (Jika belum ada)
     if (!isset($uniqueHeaders[$cleanKey])) {
-        $uniqueHeaders[$cleanKey] = $headerLabel;
+        // Label Header yang cantik (Huruf besar asli)
+        $uniqueHeaders[$cleanKey] = $raw;
     }
 }
 
+// KUNCI URUTAN KOLOM (PENTING AGAR TIDAK GESER)
+// Kita simpan daftar Key urut sesuai Header yang terbentuk
+$finalColumnKeys = array_keys($uniqueHeaders);
+
+
 // ============================================================
-// 5. AMBIL DATA RESPONDEN
+// 4. AMBIL DATA RESPONDEN
 // ============================================================
 $sqlR = "SELECT * FROM respondents";
 $paramsR = [];
@@ -78,21 +86,16 @@ $stmtR->execute($paramsR);
 $respondents = $stmtR->fetchAll(PDO::FETCH_ASSOC);
 
 // ============================================================
-// 6. BERSIHKAN BUFFER SEBELUM DOWNLOAD
+// 5. OUTPUT FILE EXCEL
 // ============================================================
-// Ini penting! Menghapus semua output (seperti pesan error warning/notice) sebelum kirim file
-ob_end_clean(); 
+ob_end_clean(); // Bersihkan buffer
 
-// Header Excel
 $fileName = "Survey_Report_" . date('Y-m-d_His') . ".xls";
 header("Content-Type: application/vnd.ms-excel");
 header("Content-Disposition: attachment; filename=$fileName");
 header("Pragma: no-cache");
 header("Expires: 0");
 
-// ============================================================
-// 7. OUTPUT TABEL HTML (EXCEL)
-// ============================================================
 echo "<table border='1'>";
 
 // A. HEADER TABEL
@@ -105,8 +108,9 @@ echo "<td style='width:200px;'>Email</td>";
 echo "<td style='width:150px;'>Divisi</td>";
 echo "<td style='width:150px;'>Perusahaan</td>";
 
-// Loop Header Unik (Sudah Dirampingkan)
-foreach ($uniqueHeaders as $key => $label) {
+// Loop Header sesuai urutan KUNCI yang sudah kita kunci di atas
+foreach ($finalColumnKeys as $key) {
+    $label = $uniqueHeaders[$key];
     $shortLabel = strlen($label) > 60 ? substr($label, 0, 57) . '...' : $label;
     echo "<td style='background-color:#e0e7ff; width:150px;'>$shortLabel</td>";
 }
@@ -118,21 +122,18 @@ foreach ($respondents as $resp) {
     echo "<tr>";
     echo "<td>" . $no++ . "</td>";
     
-    // --- TANGGAL SUBMIT ---
-    // Cek prioritas berdasarkan database SQL Anda
+    // --- FIX TANGGAL (Cek semua kemungkinan kolom) ---
     $tgl = '-';
-    // Berdasarkan file dev-survey_it (1).sql, nama kolomnya adalah `submission_date`
-    if (!empty($resp['submission_date'])) {
-        $tgl = $resp['submission_date'];
-    } elseif (!empty($resp['submitted_at'])) {
+    if (!empty($resp['submitted_at'])) {
         $tgl = $resp['submitted_at'];
     } elseif (!empty($resp['created_at'])) {
         $tgl = $resp['created_at'];
+    } elseif (!empty($resp['submission_date'])) {
+        $tgl = $resp['submission_date'];
     }
     echo "<td>" . $tgl . "</td>"; 
 
     // DATA DIRI
-    // Menggunakan tanda kutip ' agar Excel membaca NIK sebagai Text (angka 0 di depan aman)
     echo "<td>'" . ($resp['nik'] ?? '-') . "</td>"; 
     echo "<td>" . ($resp['full_name'] ?? '-') . "</td>"; 
     echo "<td>" . ($resp['email'] ?? '-') . "</td>"; 
@@ -144,25 +145,28 @@ foreach ($respondents as $resp) {
     $compName = $stmtC->fetchColumn();
     echo "<td>" . $compName . "</td>";
 
-    // --- JAWABAN YANG DIRAMPINGKAN ---
+    // --- PENGAMBILAN JAWABAN (MENGGUNAKAN LOGIKA MERGE) ---
     
-    // 1. Ambil jawaban mentah by ID
+    // 1. Ambil semua jawaban responden ini (ID Pertanyaan => Nilai)
     $stmtAns = $pdo->prepare("SELECT question_id, answer_value FROM answers WHERE respondent_id = ?");
     $stmtAns->execute([$resp['id']]);
     $answersById = $stmtAns->fetchAll(PDO::FETCH_KEY_PAIR); 
 
-    // 2. Konversi Jawaban: Dari ID menjadi Key Teks
-    $answersByKey = [];
+    // 2. Petakan Jawaban ke Key Teks
+    $respondentAnswersByKey = [];
     foreach ($answersById as $qid => $val) {
-        if (isset($questionIdToTextMap[$qid])) {
-            $textKey = $questionIdToTextMap[$qid];
-            $answersByKey[$textKey] = $val;
+        if (isset($questionIdToKeyMap[$qid])) {
+            $key = $questionIdToKeyMap[$qid]; // Ubah ID 10 jadi "internet"
+            $respondentAnswersByKey[$key] = $val;
         }
     }
 
-    // 3. Loop Kolom Header Unik
-    foreach ($uniqueHeaders as $key => $label) {
-        $val = isset($answersByKey[$key]) ? $answersByKey[$key] : '-';
+    // 3. Isi Kolom sesuai URUTAN KUNCI HEADER (Dijamin Match)
+    foreach ($finalColumnKeys as $key) {
+        // Cek apakah user punya jawaban untuk Key pertanyaan ini?
+        $val = isset($respondentAnswersByKey[$key]) ? $respondentAnswersByKey[$key] : '-';
+        
+        // Bersihkan enter agar tabel tidak pecah
         $val = str_replace(["\r", "\n"], " ", $val);
         echo "<td>" . htmlspecialchars($val) . "</td>";
     }
