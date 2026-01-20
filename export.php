@@ -25,7 +25,7 @@ header("Content-Disposition: attachment; filename=$fileName");
 header("Pragma: no-cache");
 header("Expires: 0");
 
-// 4. AMBIL DATA PERTANYAAN (DIFILTER)
+// 4. AMBIL PERTANYAAN (DIFILTER SESUAI PT)
 $sqlQ = "SELECT id, question_text FROM questions";
 $paramsQ = [];
 
@@ -39,7 +39,7 @@ $stmtQ = $pdo->prepare($sqlQ);
 $stmtQ->execute($paramsQ);
 $questions = $stmtQ->fetchAll(PDO::FETCH_ASSOC);
 
-// 5. AMBIL DATA RESPONDEN (DIFILTER)
+// 5. AMBIL RESPONDEN (DIFILTER SESUAI PT)
 $sqlR = "SELECT * FROM respondents";
 $paramsR = [];
 
@@ -66,7 +66,6 @@ echo "<td>Email</td>";
 echo "<td>Divisi</td>";
 echo "<td>Perusahaan</td>";
 
-// Header Pertanyaan
 foreach ($questions as $q) {
     $cleanText = strip_tags($q['question_text']);
     $shortText = strlen($cleanText) > 60 ? substr($cleanText, 0, 57) . '...' : $cleanText;
@@ -80,39 +79,30 @@ foreach ($respondents as $resp) {
     echo "<tr>";
     echo "<td>" . $no++ . "</td>";
     
-    // TANGGAL (Sesuai SQL: submission_date)
+    // --- [FIX] TANGGAL SUBMIT (Sesuai info Anda: submitted_at) ---
     echo "<td>" . ($resp['submitted_at'] ?? '-') . "</td>"; 
 
-    // --- PERBAIKAN UTAMA (SESUAI DATABASE ANDA) ---
-    // NIK (Sesuai SQL: nik)
+    // DATA DIRI (Sesuai Database SQL)
     echo "<td>'" . ($resp['nik'] ?? '-') . "</td>"; 
-    
-    // NAMA (Sesuai SQL: full_name)
     echo "<td>" . ($resp['full_name'] ?? '-') . "</td>"; 
-    
-    // EMAIL (Sesuai SQL: email)
     echo "<td>" . ($resp['email'] ?? '-') . "</td>"; 
-    
-    // DIVISI (Sesuai SQL: division)
     echo "<td>" . ($resp['division'] ?? '-') . "</td>"; 
     
-    // Ambil Nama Company
+    // NAMA PERUSAHAAN
     $stmtC = $pdo->prepare("SELECT name FROM companies WHERE id = ?");
     $stmtC->execute([$resp['company_id']]);
     $compName = $stmtC->fetchColumn();
     echo "<td>" . $compName . "</td>";
 
-    // Ambil Jawaban
+    // JAWABAN
     $stmtAns = $pdo->prepare("SELECT question_id, answer_value FROM answers WHERE respondent_id = ?");
     $stmtAns->execute([$resp['id']]);
     $answersRaw = $stmtAns->fetchAll(PDO::FETCH_KEY_PAIR);
 
-    // Loop kolom jawaban
     foreach ($questions as $q) {
         $qid = $q['id'];
         $val = isset($answersRaw[$qid]) ? $answersRaw[$qid] : '-';
-        
-        $val = str_replace(["\r", "\n"], " ", $val);
+        $val = str_replace(["\r", "\n"], " ", $val); // Hapus enter biar rapi
         echo "<td>" . htmlspecialchars($val) . "</td>";
     }
 
