@@ -1,8 +1,8 @@
 <?php
 // config.php
 $host = 'localhost';
-$db   = 'survey_it';
-$user = 'admin';
+$db   = 'dev-survey_it';
+$user = 'admin-dev';
 $pass = 'Jam10pagi#';
 
 try {
