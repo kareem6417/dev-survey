@@ -80,22 +80,21 @@ foreach ($respondents as $resp) {
     echo "<tr>";
     echo "<td>" . $no++ . "</td>";
     
-    // Cek nama kolom tanggal (bisa created_at atau submission_date)
-    $tgl = $resp['created_at'] ?? $resp['submission_date'] ?? '-';
-    echo "<td>" . $tgl . "</td>"; 
+    // TANGGAL (Sesuai SQL: submission_date)
+    echo "<td>" . ($resp['submission_date'] ?? '-') . "</td>"; 
 
-    // --- PERBAIKAN DI SINI (Sesuaikan nama kolom DB) ---
-    // Menggunakan 'respondent_nik' bukan 'nik'
-    echo "<td>'" . ($resp['respondent_nik'] ?? '-') . "</td>"; 
+    // --- PERBAIKAN UTAMA (SESUAI DATABASE ANDA) ---
+    // NIK (Sesuai SQL: nik)
+    echo "<td>'" . ($resp['nik'] ?? '-') . "</td>"; 
     
-    // Menggunakan 'respondent_name' bukan 'full_name'
-    echo "<td>" . ($resp['respondent_name'] ?? '-') . "</td>"; 
+    // NAMA (Sesuai SQL: full_name)
+    echo "<td>" . ($resp['full_name'] ?? '-') . "</td>"; 
     
-    // Menggunakan 'respondent_email' bukan 'email'
-    echo "<td>" . ($resp['respondent_email'] ?? '-') . "</td>"; 
+    // EMAIL (Sesuai SQL: email)
+    echo "<td>" . ($resp['email'] ?? '-') . "</td>"; 
     
-    // Menggunakan 'respondent_division' bukan 'division'
-    echo "<td>" . ($resp['respondent_division'] ?? '-') . "</td>"; 
+    // DIVISI (Sesuai SQL: division)
+    echo "<td>" . ($resp['division'] ?? '-') . "</td>"; 
     
     // Ambil Nama Company
     $stmtC = $pdo->prepare("SELECT name FROM companies WHERE id = ?");
@@ -113,7 +112,6 @@ foreach ($respondents as $resp) {
         $qid = $q['id'];
         $val = isset($answersRaw[$qid]) ? $answersRaw[$qid] : '-';
         
-        // Bersihkan enter/newline agar tabel excel tidak pecah
         $val = str_replace(["\r", "\n"], " ", $val);
         echo "<td>" . htmlspecialchars($val) . "</td>";
     }
