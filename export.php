@@ -81,7 +81,7 @@ foreach ($respondents as $resp) {
     echo "<td>" . $no++ . "</td>";
     
     // TANGGAL (Sesuai SQL: submission_date)
-    echo "<td>" . ($resp['submission_date'] ?? '-') . "</td>"; 
+    echo "<td>" . ($resp['submitted_at'] ?? '-') . "</td>"; 
 
     // --- PERBAIKAN UTAMA (SESUAI DATABASE ANDA) ---
     // NIK (Sesuai SQL: nik)
