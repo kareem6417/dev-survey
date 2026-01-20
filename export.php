@@ -1,179 +1,168 @@
 <?php
-// BUFFERING: Mencegah error output sebelum download
+// 1. BERSIHKAN BUFFER & SESSION
 ob_start();
 session_start();
 require 'config.php';
 
-// 1. CEK KEAMANAN
+// 2. CEK KEAMANAN
 if (!isset($_SESSION['is_admin_logged_in']) || $_SESSION['is_admin_logged_in'] !== true) {
     die("Akses Ditolak. Harap login terlebih dahulu.");
 }
 
-// 2. FILTER & HAK AKSES
-$adminScope = $_SESSION['admin_scope'] ?? 0;
+// 3. FILTER & HAK AKSES
+$adminScope = $_SESSION['admin_scope'] ?? 0;   // 'ALL' atau ID Company
 $filterInput = $_GET['filter_company'] ?? 'ALL';
 
+// Tentukan Scope Akhir
 $finalFilter = 'ALL';
 if ($adminScope === 'ALL') {
-    $finalFilter = $filterInput;
+    $finalFilter = $filterInput; // Super Admin bisa pilih ALL atau spesifik
 } else {
-    $finalFilter = $adminScope;
+    $finalFilter = $adminScope;  // Admin PT terkunci di PT-nya sendiri
 }
 
-// ============================================================
-// 3. LOGIKA MERGING PERTANYAAN (AGAR TIDAK BERULANG)
-// ============================================================
+// 4. SIAPKAN DAFTAR PERUSAHAAN (Untuk dijadikan Sheet)
+$sqlComp = "SELECT * FROM companies";
+$paramsComp = [];
 
-// Ambil pertanyaan (Filter sesuai hak akses/pilihan)
-$sqlQ = "SELECT id, question_text FROM questions";
-$paramsQ = [];
-
+// Jika filter spesifik (bukan ALL), hanya ambil 1 perusahaan itu saja
 if ($finalFilter !== 'ALL') {
-    $sqlQ .= " WHERE company_id = ?";
-    $paramsQ[] = $finalFilter;
+    $sqlComp .= " WHERE id = ?";
+    $paramsComp[] = $finalFilter;
 }
-// Urutkan berdasarkan Teks agar pertanyaan yang sama berkumpul
-$sqlQ .= " ORDER BY question_text ASC, id ASC"; 
+$sqlComp .= " ORDER BY id ASC";
 
-$stmtQ = $pdo->prepare($sqlQ);
-$stmtQ->execute($paramsQ);
-$allQuestions = $stmtQ->fetchAll(PDO::FETCH_ASSOC);
+$stmtComp = $pdo->prepare($sqlComp);
+$stmtComp->execute($paramsComp);
+$companies = $stmtComp->fetchAll(PDO::FETCH_ASSOC);
 
-// MAPPING & HEADER PREPARATION
-$questionIdToKeyMap = []; // Map ID Pertanyaan -> Key Unik
-$uniqueHeaders = [];      // Daftar Header Unik (Key -> Label Asli)
+// Bersihkan buffer sebelum kirim header
+ob_end_clean();
 
-foreach ($allQuestions as $q) {
-    // BERSIHKAN TEKS SEBERSIH-BERSIHNYA
-    $raw = $q['question_text'];
-    $raw = html_entity_decode($raw);       // Ubah &nbsp; jadi spasi
-    $raw = strip_tags($raw);               // Hapus tag HTML
-    $raw = preg_replace('/\s+/', ' ', $raw); // Hapus spasi ganda/enter
-    $raw = trim($raw);                     // Hapus spasi depan/belakang
-    
-    // Key Unik (Huruf kecil semua)
-    $cleanKey = strtolower($raw); 
-    
-    // Map ID -> Key (Contoh: ID 10 -> "internet", ID 55 -> "internet")
-    $questionIdToKeyMap[$q['id']] = $cleanKey;
-
-    // Simpan Header (Jika belum ada)
-    if (!isset($uniqueHeaders[$cleanKey])) {
-        // Label Header yang cantik (Huruf besar asli)
-        $uniqueHeaders[$cleanKey] = $raw;
-    }
-}
-
-// KUNCI URUTAN KOLOM (PENTING AGAR TIDAK GESER)
-// Kita simpan daftar Key urut sesuai Header yang terbentuk
-$finalColumnKeys = array_keys($uniqueHeaders);
-
-
-// ============================================================
-// 4. AMBIL DATA RESPONDEN
-// ============================================================
-$sqlR = "SELECT * FROM respondents";
-$paramsR = [];
-
-if ($finalFilter !== 'ALL') {
-    $sqlR .= " WHERE company_id = ?";
-    $paramsR[] = $finalFilter;
-}
-$sqlR .= " ORDER BY id DESC";
-
-$stmtR = $pdo->prepare($sqlR);
-$stmtR->execute($paramsR);
-$respondents = $stmtR->fetchAll(PDO::FETCH_ASSOC);
-
-// ============================================================
-// 5. OUTPUT FILE EXCEL
-// ============================================================
-ob_end_clean(); // Bersihkan buffer
-
-$fileName = "Survey_Report_" . date('Y-m-d_His') . ".xls";
-header("Content-Type: application/vnd.ms-excel");
-header("Content-Disposition: attachment; filename=$fileName");
+// 5. HEADER DOWNLOAD XML EXCEL
+$fileName = "Survey_Report_" . date('Ymd_His') . ".xls";
+header("Content-Type: application/vnd.ms-excel; charset=UTF-8");
+header("Content-Disposition: attachment; filename=\"$fileName\"");
 header("Pragma: no-cache");
 header("Expires: 0");
 
-echo "<table border='1'>";
-
-// A. HEADER TABEL
-echo "<tr style='background-color:#f0f0f0; font-weight:bold; vertical-align:middle;'>";
-echo "<td style='width:40px;'>No</td>";
-echo "<td style='width:120px;'>Tanggal Submit</td>";
-echo "<td style='width:100px;'>NIK</td>";
-echo "<td style='width:200px;'>Nama</td>";
-echo "<td style='width:200px;'>Email</td>";
-echo "<td style='width:150px;'>Divisi</td>";
-echo "<td style='width:150px;'>Perusahaan</td>";
-
-// Loop Header sesuai urutan KUNCI yang sudah kita kunci di atas
-foreach ($finalColumnKeys as $key) {
-    $label = $uniqueHeaders[$key];
-    $shortLabel = strlen($label) > 60 ? substr($label, 0, 57) . '...' : $label;
-    echo "<td style='background-color:#e0e7ff; width:150px;'>$shortLabel</td>";
-}
-echo "</tr>";
-
-// B. ISI DATA
-$no = 1;
-foreach ($respondents as $resp) {
-    echo "<tr>";
-    echo "<td>" . $no++ . "</td>";
-    
-    // --- FIX TANGGAL (Cek semua kemungkinan kolom) ---
-    $tgl = '-';
-    if (!empty($resp['submitted_at'])) {
-        $tgl = $resp['submitted_at'];
-    } elseif (!empty($resp['created_at'])) {
-        $tgl = $resp['created_at'];
-    } elseif (!empty($resp['submission_date'])) {
-        $tgl = $resp['submission_date'];
-    }
-    echo "<td>" . $tgl . "</td>"; 
-
-    // DATA DIRI
-    echo "<td>'" . ($resp['nik'] ?? '-') . "</td>"; 
-    echo "<td>" . ($resp['full_name'] ?? '-') . "</td>"; 
-    echo "<td>" . ($resp['email'] ?? '-') . "</td>"; 
-    echo "<td>" . ($resp['division'] ?? '-') . "</td>"; 
-    
-    // NAMA PERUSAHAAN
-    $stmtC = $pdo->prepare("SELECT name FROM companies WHERE id = ?");
-    $stmtC->execute([$resp['company_id']]);
-    $compName = $stmtC->fetchColumn();
-    echo "<td>" . $compName . "</td>";
-
-    // --- PENGAMBILAN JAWABAN (MENGGUNAKAN LOGIKA MERGE) ---
-    
-    // 1. Ambil semua jawaban responden ini (ID Pertanyaan => Nilai)
-    $stmtAns = $pdo->prepare("SELECT question_id, answer_value FROM answers WHERE respondent_id = ?");
-    $stmtAns->execute([$resp['id']]);
-    $answersById = $stmtAns->fetchAll(PDO::FETCH_KEY_PAIR); 
-
-    // 2. Petakan Jawaban ke Key Teks
-    $respondentAnswersByKey = [];
-    foreach ($answersById as $qid => $val) {
-        if (isset($questionIdToKeyMap[$qid])) {
-            $key = $questionIdToKeyMap[$qid]; // Ubah ID 10 jadi "internet"
-            $respondentAnswersByKey[$key] = $val;
-        }
-    }
-
-    // 3. Isi Kolom sesuai URUTAN KUNCI HEADER (Dijamin Match)
-    foreach ($finalColumnKeys as $key) {
-        // Cek apakah user punya jawaban untuk Key pertanyaan ini?
-        $val = isset($respondentAnswersByKey[$key]) ? $respondentAnswersByKey[$key] : '-';
-        
-        // Bersihkan enter agar tabel tidak pecah
-        $val = str_replace(["\r", "\n"], " ", $val);
-        echo "<td>" . htmlspecialchars($val) . "</td>";
-    }
-
-    echo "</tr>";
-}
-
-echo "</table>";
-exit();
+// ==============================================================================
+// 6. STRUKTUR XML EXCEL (Mendukung Multi Sheet)
+// ==============================================================================
+echo '<?xml version="1.0"?>';
+echo '<?mso-application progid="Excel.Sheet"?>';
 ?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
+ xmlns:o="urn:schemas-microsoft-com:office:office"
+ xmlns:x="urn:schemas-microsoft-com:office:excel"
+ xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"
+ xmlns:html="http://www.w3.org/TR/REC-html40">
+ <Styles>
+  <Style ss:ID="Default" ss:Name="Normal">
+   <Alignment ss:Vertical="Bottom"/>
+   <Borders/>
+   <Font ss:FontName="Calibri" x:Family="Swiss" ss:Size="11" ss:Color="#000000"/>
+   <Interior/>
+   <NumberFormat/>
+   <Protection/>
+  </Style>
+  <Style ss:ID="HeaderStyle">
+   <Font ss:FontName="Calibri" x:Family="Swiss" ss:Size="11" ss:Color="#000000" ss:Bold="1"/>
+   <Interior ss:Color="#D9E1F2" ss:Pattern="Solid"/>
+   <Borders>
+    <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1"/>
+    <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1"/>
+    <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1"/>
+    <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1"/>
+   </Borders>
+  </Style>
+  <Style ss:ID="DateStyle">
+   <NumberFormat ss:Format="Short Date"/>
+  </Style>
+ </Styles>
+
+<?php
+// ==============================================================================
+// 7. LOOPING SHEET PER PERUSAHAAN
+// ==============================================================================
+foreach ($companies as $company) {
+    $companyId = $company['id'];
+    // Nama Sheet (Bersihkan karakter yang dilarang Excel: \ / ? * [ ] :)
+    $sheetName = preg_replace('/[\\\\\/:\*\?\[\]]/', '', $company['code'] ?: $company['name']);
+    $sheetName = substr($sheetName, 0, 30); // Maksimal 31 karakter
+    
+    // --- AMBIL PERTANYAAN KHUSUS PT INI ---
+    // Ini kuncinya: Pertanyaan MIP tidak akan muncul di Sheet MPM
+    $stmtQ = $pdo->prepare("SELECT id, question_text FROM questions WHERE company_id = ? ORDER BY id ASC");
+    $stmtQ->execute([$companyId]);
+    $questions = $stmtQ->fetchAll(PDO::FETCH_ASSOC);
+
+    // --- AMBIL RESPONDEN KHUSUS PT INI ---
+    $stmtR = $pdo->prepare("SELECT * FROM respondents WHERE company_id = ? ORDER BY id DESC");
+    $stmtR->execute([$companyId]);
+    $respondents = $stmtR->fetchAll(PDO::FETCH_ASSOC);
+
+    // Mulai Worksheet
+    echo '<Worksheet ss:Name="' . htmlspecialchars($sheetName) . '">';
+    echo '<Table>';
+
+    // --- A. HEADER BARIS (Judul Kolom) ---
+    echo '<Row>';
+    // Kolom Statis
+    $headers = ['No', 'Tanggal Submit', 'NIK', 'Nama', 'Email', 'Divisi'];
+    foreach ($headers as $h) {
+        echo '<Cell ss:StyleID="HeaderStyle"><Data ss:Type="String">' . $h . '</Data></Cell>';
+    }
+    // Kolom Pertanyaan Dinamis
+    foreach ($questions as $q) {
+        $qText = strip_tags($q['question_text']); // Bersihkan HTML
+        $qText = htmlspecialchars($qText); // Escape XML
+        echo '<Cell ss:StyleID="HeaderStyle"><Data ss:Type="String">' . $qText . '</Data></Cell>';
+    }
+    echo '</Row>';
+
+    // --- B. ISI DATA RESPONDEN ---
+    $no = 1;
+    foreach ($respondents as $resp) {
+        echo '<Row>';
+        
+        // 1. No
+        echo '<Cell><Data ss:Type="Number">' . $no++ . '</Data></Cell>';
+        
+        // 2. Tanggal (Prioritas: submitted_at -> created_at -> date)
+        $tgl = $resp['submitted_at'] ?? $resp['created_at'] ?? $resp['date'] ?? '';
+        echo '<Cell><Data ss:Type="String">' . $tgl . '</Data></Cell>';
+
+        // 3. NIK (String agar nol di depan tidak hilang)
+        echo '<Cell><Data ss:Type="String">' . htmlspecialchars($resp['nik'] ?? '-') . '</Data></Cell>';
+
+        // 4. Nama
+        echo '<Cell><Data ss:Type="String">' . htmlspecialchars($resp['full_name'] ?? '-') . '</Data></Cell>';
+
+        // 5. Email
+        echo '<Cell><Data ss:Type="String">' . htmlspecialchars($resp['email'] ?? '-') . '</Data></Cell>';
+
+        // 6. Divisi
+        echo '<Cell><Data ss:Type="String">' . htmlspecialchars($resp['division'] ?? '-') . '</Data></Cell>';
+
+        // --- AMBIL JAWABAN UNTUK ROW INI ---
+        $stmtAns = $pdo->prepare("SELECT question_id, answer_value FROM answers WHERE respondent_id = ?");
+        $stmtAns->execute([$resp['id']]);
+        $answers = $stmtAns->fetchAll(PDO::FETCH_KEY_PAIR); // [question_id => jawaban]
+
+        // Loop Jawaban sesuai Urutan Pertanyaan Header Sheet Ini
+        foreach ($questions as $q) {
+            $val = isset($answers[$q['id']]) ? $answers[$q['id']] : '-';
+            // Bersihkan karakter kontrol XML yang invalid
+            $val = htmlspecialchars($val); 
+            echo '<Cell><Data ss:Type="String">' . $val . '</Data></Cell>';
+        }
+
+        echo '</Row>';
+    }
+
+    echo '</Table>';
+    echo '</Worksheet>';
+}
+?>
+</Workbook>
